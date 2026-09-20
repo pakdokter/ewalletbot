@@ -17,6 +17,10 @@ Hasilnya adalah **rekap internal**, bukan e-statement resmi GoPay. OVO menyusul 
    `RAILWAY_VOLUME_MOUNT_PATH` otomatis dan bot memakainya. Tanpa Volume, sesi hilang tiap redeploy.
 5. Jalankan **tepat 1 replika** (long polling; 2 replika akan saling bentrok). Tidak perlu domain publik.
 
+> Cek log saat start: baris `data=/data` berarti Volume terpasang. Kalau tertulis `data=data`,
+> Volume belum terpasang dan sesi akan hilang saat redeploy.
+> Token bot tidak lagi tercetak di log. Jika pernah tercetak/terkirim ke pihak lain, ganti lewat BotFather (`/revoke`).
+
 ## Cara pakai
 
 1. `/saldoawal 62620.36` — saldo GoPay sebelum transaksi pertama (screenshot tidak memuat saldo).
@@ -46,7 +50,7 @@ Hasilnya adalah **rekap internal**, bukan e-statement resmi GoPay. OVO menyusul 
 
 ## Status verifikasi
 
-Sudah diuji: foto layar GoPay contoh (4/4 baris benar), 15 unit test, Excel dihitung ulang di
+Sudah diuji: foto layar GoPay contoh (4/4 baris benar), 18 unit test, Excel dihitung ulang di
 LibreOffice (0 error, saldo cocok hitungan manual), alur bot dengan mock Telegram.
 
 **Belum diuji:** koneksi Telegram sungguhan, build Docker/deploy Railway, album multi-foto,

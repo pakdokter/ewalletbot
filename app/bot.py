@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
+import re
 import sys
 import tempfile
 from datetime import date
@@ -12,6 +13,7 @@ from pathlib import Path
 import pytesseract
 from telegram import Message, Update
 from telegram.constants import ParseMode
+from telegram.error import BadRequest
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 from . import config
@@ -75,13 +77,23 @@ def flag_lines(rows: list[tuple[int, Txn]]) -> str:
     return "\n".join(f"⚠ {i}: {html.escape('; '.join(t.flags))}" for i, t in rows if t.flags)
 
 
+async def send_html(msg: Message, text: str) -> None:
+    """Kirim sebagai HTML; jika Telegram menolak markup, kirim ulang sebagai teks polos agar hasil tidak hilang."""
+    try:
+        await msg.reply_text(text, parse_mode=ParseMode.HTML)
+    except BadRequest:
+        log.exception("HTML ditolak Telegram, kirim ulang sebagai teks polos")
+        plain = html.unescape(re.sub(r"</?(b|i|pre|code)>", "", text))
+        await msg.reply_text(plain)
+
+
 async def reply_chunks(msg: Message, rows: list[tuple[int, Txn]], head: str = "", tail: str = "") -> None:
     chunks = [rows[i:i + 25] for i in range(0, len(rows), 25)] or [[]]
     for n, ch in enumerate(chunks):
         text = (head if n == 0 else "") + (table(ch) if ch else "")
         if n == len(chunks) - 1:
             text += tail
-        await msg.reply_text(text, parse_mode=ParseMode.HTML)
+        await send_html(msg, text)
 
 
 def authorized(fn):
@@ -283,7 +295,7 @@ async def process_image(msg: Message, data: bytes, compressed: bool) -> None:
         if compressed and any(("tanggal tidak" in f or "metode tidak" in f) for t in fresh for f in t.flags):
             tail += "\n📎 Tanggal/metode hilang karena Telegram mengompres foto. Kirim ulang sebagai <b>File</b> (📎 → File)."
         if s.saldo_awal is None:
-            tail += "\n💡 Belum ada saldo awal: /saldoawal <nominal>"
+            tail += "\n💡 Belum ada saldo awal: /saldoawal &lt;nominal&gt;"
         tail += f"\nTotal sesi: {len(s.rows)} baris. Kirim screenshot berikutnya atau /rekap."
         await reply_chunks(msg, numbered, head=head, tail=tail)
 
@@ -318,12 +330,19 @@ async def on_image(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def on_error(update: object, ctx: ContextTypes.DEFAULT_TYPE):
     log.error("Error tak tertangani", exc_info=ctx.error)
+    if isinstance(update, Update) and update.effective_message:
+        try:
+            await update.effective_message.reply_text("Terjadi kesalahan di bot. Data yang sudah masuk aman, cek dengan /daftar.")
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------- main
 def main() -> None:
     global provider
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    for noisy in ("httpx", "httpcore"):          # URL request Telegram memuat token bot
+        logging.getLogger(noisy).setLevel(logging.WARNING)
     if not config.BOT_TOKEN:
         sys.exit("TELEGRAM_BOT_TOKEN belum diisi.")
     if not config.ALLOWED_USER_IDS:
