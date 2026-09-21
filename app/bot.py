@@ -14,7 +14,7 @@ import pytesseract
 from telegram import Message, Update
 from telegram.constants import ParseMode
 from telegram.error import BadRequest
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, TypeHandler, filters
 
 from . import config
 from .excel_export import build_workbook
@@ -33,7 +33,8 @@ HELP = (
     "Kirim screenshot <i>Riwayat transaksi</i> GoPay, saya baca tanggal, item, dan nominalnya, "
     "lalu kamu bisa unduh Excel berformat Jago.\n\n"
     "<b>Alur</b>\n"
-    "1. /saldoawal 62620.36 - saldo dompet sebelum transaksi pertama\n"
+    "1. /saldoawal 62620.36 - saldo dompet sebelum transaksi pertama (boleh 0). "
+    "Mengetik angkanya saja juga bisa selama saldo awal belum diisi.\n"
     "2. Kirim <b>foto atau screenshot</b> berurutan dari atas ke bawah (boleh album). "
     "Untuk foto layar HP: dekatkan sampai layar memenuhi foto, tegak lurus, tanpa pantulan. "
     "Kirim sebagai File (📎 → File) bila ingin kualitas asli.\n"
@@ -274,6 +275,49 @@ async def cmd_rekap(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_document(f, filename=path.name, caption=caption[:1000])
 
 
+# ---------------------------------------------------------------- teks biasa (bot tidak boleh diam)
+_SALDO_TEXT = re.compile(r"^/?saldo\s*awal\s*[:=]?\s*(.+)$", re.I)
+UNKNOWN = ("Pesan itu belum saya pahami. Kirim foto/screenshot Riwayat transaksi GoPay, "
+           "atau pakai perintah: /saldoawal, /daftar, /rekap. /bantuan menampilkan semuanya.")
+
+
+@authorized
+async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Teks tanpa perintah: 'saldoawal 0' / '0' (saat saldo awal belum diisi) dikenali; lainnya dijawab petunjuk."""
+    text = (update.message.text or "").strip()
+    s = store.get(update.effective_chat.id)
+    m = _SALDO_TEXT.match(text)
+    explicit = bool(m)
+    try:
+        value = parse_rupiah(m.group(1) if m else text)
+    except ValueError:
+        value = None
+    if value is None:
+        await update.message.reply_text(UNKNOWN)
+    elif explicit or s.saldo_awal is None:
+        s.saldo_awal = value
+        store.save(s)
+        await update.message.reply_text(f"Saldo awal: Rp {rp2(value)}")
+    else:
+        await update.message.reply_text(f"Saldo awal saat ini Rp {rp2(s.saldo_awal)}. "
+                                        "Untuk mengubahnya kirim /saldoawal <nominal>, mis. /saldoawal 0")
+
+
+@authorized
+async def on_unknown_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Perintah itu tidak dikenal. /bantuan menampilkan daftar perintah.")
+
+
+async def trace(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Catat jenis tiap pesan masuk (tanpa isi/angka) agar log Railway menunjukkan apakah pesan sampai."""
+    m = update.effective_message
+    if m is None:
+        return
+    kind = ("photo" if m.photo else "document" if m.document else
+            f"command {m.text.split()[0].split('@')[0]}" if (m.text or "").startswith("/") else "text")
+    log.info("pesan masuk: %s dari user %s", kind, update.effective_user.id if update.effective_user else "?")
+
+
 # ---------------------------------------------------------------- gambar
 async def process_image(msg: Message, data: bytes, compressed: bool) -> None:
     chat_id = msg.chat_id
@@ -370,6 +414,20 @@ async def on_error(update: object, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 # ---------------------------------------------------------------- main
+def register(app: Application) -> None:
+    """Daftarkan handler. Urutan penting: handler spesifik dulu, 'perintah tak dikenal' paling akhir."""
+    app.add_handler(CommandHandler("id", cmd_id))
+    for name, fn in (("start", cmd_start), ("bantuan", cmd_start), ("wallet", cmd_wallet), ("saldoawal", cmd_saldoawal),
+                     ("daftar", cmd_daftar), ("ubah", cmd_ubah), ("tanggal", cmd_tanggal), ("hapus", cmd_hapus),
+                     ("rekap", cmd_rekap), ("reset", cmd_reset)):
+        app.add_handler(CommandHandler(name, fn))
+    app.add_handler(TypeHandler(Update, trace), group=-1)          # hanya mencatat; tidak menghentikan handler lain
+    app.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, on_image))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
+    app.add_handler(MessageHandler(filters.COMMAND, on_unknown_command))   # paling akhir
+    app.add_error_handler(on_error)
+
+
 def main() -> None:
     global provider
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -390,12 +448,7 @@ def main() -> None:
     log.info("Tesseract %s | provider=%s | data=%s", pytesseract.get_tesseract_version(), config.OCR_PROVIDER, config.DATA_DIR)
 
     app = Application.builder().token(config.BOT_TOKEN).build()
-    app.add_handler(CommandHandler("id", cmd_id))
-    for name, fn in (("start", cmd_start), ("bantuan", cmd_start), ("wallet", cmd_wallet), ("saldoawal", cmd_saldoawal),
-                     ("daftar", cmd_daftar), ("ubah", cmd_ubah), ("tanggal", cmd_tanggal), ("hapus", cmd_hapus), ("rekap", cmd_rekap), ("reset", cmd_reset)):
-        app.add_handler(CommandHandler(name, fn))
-    app.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, on_image))
-    app.add_error_handler(on_error)
+    register(app)
     app.run_polling(drop_pending_updates=True)
 
 

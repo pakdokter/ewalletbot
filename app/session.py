@@ -19,6 +19,8 @@ def parse_rupiah(text: str) -> float:
     t = re.sub(r"[Rp\s]", "", text, flags=re.I)
     neg = t.startswith(("-", "(")) or t.endswith(")")
     t = t.strip("-+()")
+    if not re.fullmatch(r"[\d.,]+", t):            # tolak 'nan', 'inf', '1e5', teks biasa
+        raise ValueError(f"bukan angka: {text!r}")
     if "," in t and "." in t:                       # gaya Indonesia: titik ribuan, koma desimal
         t = t.replace(".", "").replace(",", ".")
     elif "," in t:
