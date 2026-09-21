@@ -34,13 +34,15 @@ HELP = (
     "lalu kamu bisa unduh Excel berformat Jago.\n\n"
     "<b>Alur</b>\n"
     "1. /saldoawal 62620.36 - saldo dompet sebelum transaksi pertama\n"
-    "2. Kirim screenshot berurutan dari atas ke bawah (boleh album). "
-    "<b>Kirim sebagai File</b> (📎 → File) agar tidak dikompres Telegram.\n"
+    "2. Kirim <b>foto atau screenshot</b> berurutan dari atas ke bawah (boleh album). "
+    "Untuk foto layar HP: dekatkan sampai layar memenuhi foto, tegak lurus, tanpa pantulan. "
+    "Kirim sebagai File (📎 → File) bila ingin kualitas asli.\n"
     "3. Cek hasil; perbaiki dengan /ubah atau /hapus\n"
     "4. /rekap - unduh Excel\n\n"
     "<b>Perintah</b>\n"
     "/daftar - lihat semua baris\n"
     "/ubah &lt;no&gt; ket|nominal|tgl|metode &lt;nilai&gt; - koreksi baris\n"
+    "/tanggal dd/mm/yyyy [no ...] - isi tanggal pada baris yang tanggalnya tidak terbaca\n"
     "/hapus &lt;no&gt; [no ...] - hapus baris\n"
     "/reset - kosongkan sesi\n"
     "/id - tampilkan ID Telegram kamu\n\n"
@@ -196,6 +198,35 @@ async def cmd_ubah(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 @authorized
+async def cmd_tanggal(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """/tanggal dd/mm/yyyy            -> isi semua baris yang belum bertanggal
+       /tanggal dd/mm/yyyy 2 3 5      -> isi hanya baris bernomor tsb"""
+    s = store.get(update.effective_chat.id)
+    if not ctx.args:
+        await update.message.reply_text("Contoh: /tanggal 01/01/2024  (semua baris tanpa tanggal)  atau  /tanggal 01/01/2024 2 3")
+        return
+    try:
+        iso = parse_date_input(ctx.args[0])
+    except ValueError as e:
+        await update.message.reply_text(str(e))
+        return
+    nums = [int(a) for a in ctx.args[1:] if a.isdigit()]
+    if any(not 1 <= n <= len(s.rows) for n in nums):
+        await update.message.reply_text(f"Nomor harus 1-{len(s.rows)}.")
+        return
+    targets = nums or [i for i, t in enumerate(s.rows, 1) if not t.date]
+    if not targets:
+        await update.message.reply_text("Tidak ada baris tanpa tanggal.")
+        return
+    for n in targets:
+        t = s.rows[n - 1]
+        t.date = iso
+        t.flags = [f for f in t.flags if not f.startswith(("tanggal", "hari", "bulan"))]
+    store.save(s)
+    await update.message.reply_text(f"Tanggal {short_date(iso)} diisi pada {len(targets)} baris.")
+
+
+@authorized
 async def cmd_hapus(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     s = store.get(update.effective_chat.id)
     nums = sorted({int(a) for a in ctx.args if a.isdigit()}, reverse=True)
@@ -292,8 +323,9 @@ async def process_image(msg: Message, data: bytes, compressed: bool) -> None:
                     "Jika itu sebenarnya transaksi berbeda, tambahkan lewat /ubah pada baris terkait atau kirim ulang."
         for n in res.notes:
             tail += f"\nℹ️ {html.escape(n)}"
-        if compressed and any(("tanggal tidak" in f or "metode tidak" in f) for t in fresh for f in t.flags):
-            tail += "\n📎 Tanggal/metode hilang karena Telegram mengompres foto. Kirim ulang sebagai <b>File</b> (📎 → File)."
+        if compressed and any(("tanggal tidak" in f or "metode ditebak" in f) for t in fresh for f in t.flags):
+            tail += ("\n📷 Teks abu-abu (tanggal/metode) sebagian hilang karena foto dikompres Telegram. "
+                     "Isi tanggal dengan /tanggal 01/01/2024, cek baris ⚠, atau foto ulang lebih dekat / kirim sebagai File.")
         if s.saldo_awal is None:
             tail += "\n💡 Belum ada saldo awal: /saldoawal &lt;nominal&gt;"
         tail += f"\nTotal sesi: {len(s.rows)} baris. Kirim screenshot berikutnya atau /rekap."
@@ -360,7 +392,7 @@ def main() -> None:
     app = Application.builder().token(config.BOT_TOKEN).build()
     app.add_handler(CommandHandler("id", cmd_id))
     for name, fn in (("start", cmd_start), ("bantuan", cmd_start), ("wallet", cmd_wallet), ("saldoawal", cmd_saldoawal),
-                     ("daftar", cmd_daftar), ("ubah", cmd_ubah), ("hapus", cmd_hapus), ("rekap", cmd_rekap), ("reset", cmd_reset)):
+                     ("daftar", cmd_daftar), ("ubah", cmd_ubah), ("tanggal", cmd_tanggal), ("hapus", cmd_hapus), ("rekap", cmd_rekap), ("reset", cmd_reset)):
         app.add_handler(CommandHandler(name, fn))
     app.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, on_image))
     app.add_error_handler(on_error)

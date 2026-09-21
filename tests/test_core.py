@@ -153,3 +153,31 @@ def test_excel_export_structure_and_formulas(tmp_path):
     assert "Non-Saldo" in wb.sheetnames and "Catatan" in wb.sheetnames
     assert wb["Non-Saldo"]["B2"].value == "Cashback MyTelkomsel [GoPay Coins]"
     assert ws["D8"].value == "=SUM(D3:D5)" and ws["E9"].value == "=SUM(E3:E5)"
+
+
+# ---------- gabung hasil antar-pass
+from app.models import ParseResult
+from app.parser import merge_results
+
+
+def _res(rows, name="p"):
+    return ParseResult("GoPay", rows, [], None, name, "GoPay")
+
+
+def test_merge_fills_date_and_method_from_other_pass_by_amount():
+    weak = _res([Txn(None, "lapakgaming", -114300, "GoPay Saldo", "GoPay", ["tanggal tidak ditemukan"]),
+                 Txn(None, "Cashback", 2000, "GoPay Coins", "GoPay", ["tanggal tidak ditemukan", "metode ditebak dari format nominal"])])
+    strong = _res([Txn("2024-01-01", "lapakgam", -114300, "GoPay Saldo", "GoPay"),
+                   Txn("2024-01-01", "Cashback", 2000, "GoPay Coins", "GoPay")])
+    out = merge_results([weak, strong])
+    got = {t.amount: (t.date, t.method, t.flags) for t in out.rows}
+    assert got[-114300] == ("2024-01-01", "GoPay Saldo", [])
+    assert got[2000] == ("2024-01-01", "GoPay Coins", [])
+
+
+def test_merge_does_not_guess_when_same_amount_counts_differ():
+    a = _res([Txn(None, "kopi", -24000, "GoPay Saldo", "GoPay", ["tanggal tidak ditemukan"]),
+              Txn(None, "kopi", -24000, "GoPay Saldo", "GoPay", ["tanggal tidak ditemukan"])])
+    b = _res([Txn("2024-01-01", "kopi", -24000, "GoPay Saldo", "GoPay")])            # hanya 1 -> ambigu
+    out = merge_results([a, b])
+    assert all(t.date is None for t in out.rows)                                      # tetap ditandai, tidak ditebak

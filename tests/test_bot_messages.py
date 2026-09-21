@@ -62,7 +62,7 @@ def fake_result(rows, wallet="GoPay"):
 
 def rows():
     return [Txn("2024-01-01", "lapak <gaming> & co", -114300, "GoPay Saldo", "GoPay", ["nama kurang jelas <cek>"]),
-            Txn("2024-01-01", "Cashback", 2000, "GoPay Coins", "GoPay")]
+            Txn(None, "Cashback", 2000, "GoPay Coins", "GoPay", ["tanggal tidak ditemukan"])]
 
 
 @pytest.fixture(autouse=True)
@@ -77,6 +77,20 @@ def test_image_reply_is_valid_html_without_saldo_awal():
     asyncio.run(B.process_image(make_msg(sink), b"x", compressed=True))
     assert any("saldoawal" in t for t in sink)          # petunjuk saldo awal tampil (tag tidak dianggap HTML)
     assert any("&lt;nominal&gt;" in t for t in sink)
+    assert any("/tanggal" in t for t in sink)           # petunjuk foto terkompres tampil & HTML-nya valid
+
+
+def test_tanggal_command_fills_only_undated_rows():
+    B.store.get(7).rows.extend([Txn(None, "a", -1, "GoPay Saldo", "GoPay", ["tanggal tidak ditemukan", "nama kurang jelas"]),
+                                Txn("2024-01-05", "b", -2, "GoPay Saldo", "GoPay")])
+    sink = []
+    upd = MagicMock(); upd.effective_chat.id = 7; upd.effective_user.id = 42; upd.message = make_msg(sink)
+    ctx = MagicMock(); ctx.args = ["01/01/2024"]
+    B.config.ALLOWED_USER_IDS.add(42)
+    asyncio.run(B.cmd_tanggal(upd, ctx))
+    rows = B.store.get(7).rows
+    assert rows[0].date == "2024-01-01" and rows[0].flags == ["nama kurang jelas"]   # hanya flag tanggal yang dihapus
+    assert rows[1].date == "2024-01-05"
 
 
 def test_help_text_is_valid_html():

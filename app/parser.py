@@ -229,7 +229,7 @@ def parse_page(page: OcrPage, wallet_hint: str | None = None, carry_date: str | 
 
     # --- kandidat nominal (kolom kanan)
     words = _merge_split_amounts([w for w in page.words if w.conf >= 0])
-    amts: list[tuple[Word, int, int]] = []          # (word, sign_text: -1/0/+1, nilai)
+    amts: list[tuple[Word, int, int, bool]] = []    # (word, sign_text: -1/0/+1, nilai, ada "Rp")
     for w in words:
         if not (top <= w.cy <= bottom) or w.left < 0.45 * W or id(w) in header_words:
             continue
@@ -246,7 +246,7 @@ def parse_page(page: OcrPage, wallet_hint: str | None = None, carry_date: str | 
         if value <= 0:
             continue
         sign = {"-": -1, "–": -1, "—": -1, "−": -1, "+": 1}.get(m["sign"] or "", 0)
-        amts.append((w, sign, value))
+        amts.append((w, sign, value, bool(m["rp"])))
     amts.sort(key=lambda x: x[0].cy)
 
     if not amts:
@@ -259,7 +259,7 @@ def parse_page(page: OcrPage, wallet_hint: str | None = None, carry_date: str | 
 
     rows: list[Txn] = []
     used: set[int] = set()
-    for i, (a, sign, value) in enumerate(amts):
+    for i, (a, sign, value, had_rp) in enumerate(amts):
         flags: list[str] = []
         band_top = (amts[i - 1][0].cy + a.cy) / 2 if i else max(top, a.cy - 0.55 * rowh)
         band_bot = (a.cy + amts[i + 1][0].cy) / 2 if i + 1 < len(amts) else min(bottom, a.cy + 0.55 * rowh)
@@ -270,8 +270,10 @@ def parse_page(page: OcrPage, wallet_hint: str | None = None, carry_date: str | 
               and a.cy + 1.2 * a.height < w.cy <= band_bot]
         method = _detect_method(mw, wallet or "GoPay")
         if not method:
-            method = "?"
-            flags.append("metode tidak terbaca")
+            # Teks metode hilang (umum pada foto terkompres). Tebakan dari format nominal: di layar contoh,
+            # nominal Saldo memakai "Rp" sedangkan Coins tanpa "Rp". Selalu ditandai agar dicek.
+            method = f"{wallet or 'GoPay'} {'Saldo' if had_rp else 'Coins'}"
+            flags.append("metode ditebak dari format nominal" + (" (bisa Saldo/Later)" if had_rp else ""))
         method_left = min((w.left for w in mw), default=None)
         for w in mw:
             used.add(id(w))
@@ -342,17 +344,59 @@ def parse_page(page: OcrPage, wallet_hint: str | None = None, carry_date: str | 
 
 
 # ---------------------------------------------------------------- orkestrasi beberapa pass OCR
+def _clean(r: Txn) -> bool:
+    return not r.flags
+
+
+def _same_amount_index(rows: list[Txn], row: Txn) -> tuple[int, int]:
+    same = [x for x in rows if x.amount == row.amount]
+    return same.index(row), len(same)
+
+
+def merge_results(results: list[ParseResult]) -> ParseResult:
+    """Ambil pass dengan baris terbanyak/terbersih sebagai dasar, lalu isi tanggal/metode yang hilang
+    dari pass lain. Baris dicocokkan lewat NOMINAL (bagian yang paling andal dibaca), berurutan bila ada
+    nominal kembar dan jumlahnya sama di kedua pass."""
+    base = max(results, key=lambda r: (len(r.rows), sum(_clean(x) for x in r.rows)))
+    for row in base.rows:
+        need_date = row.date is None or any(f.startswith(("tanggal", "hari", "bulan")) for f in row.flags)
+        need_method = any("metode" in f for f in row.flags)
+        if not (need_date or need_method):
+            continue
+        k, n = _same_amount_index(base.rows, row)
+        for other in results:
+            if other is base:
+                continue
+            same = [x for x in other.rows if x.amount == row.amount]
+            if len(same) != n:
+                continue
+            o = same[k]
+            if need_date and o.date and not any(f.startswith(("tanggal", "hari", "bulan")) for f in o.flags):
+                row.date = o.date
+                row.flags = [f for f in row.flags if not f.startswith(("tanggal", "hari", "bulan"))]
+                need_date = False
+            if need_method and not any("metode" in f for f in o.flags):
+                row.method = o.method
+                row.flags = [f for f in row.flags if "metode" not in f]
+                need_method = False
+            if not (need_date or need_method):
+                break
+    return base
+
+
 def parse_image(provider: OcrProvider, data: bytes, wallet_hint: str | None = None,
                 carry_date: str | None = None) -> ParseResult:
-    """Coba pass OCR berurutan; berhenti begitu semua baris bersih, kalau tidak pakai yang terbaik."""
-    best: ParseResult | None = None
-    best_key = (-1, -1)
+    """Coba pass OCR berurutan sampai semua baris bersih; hasil antar-pass digabung."""
+    results: list[ParseResult] = []
+    merged: ParseResult | None = None
     for page in provider.passes(data):
-        res = parse_page(page, wallet_hint, carry_date)
-        key = (len(res.rows), sum(1 for r in res.rows if not r.flags))
-        if key > best_key:
-            best, best_key = res, key
-        if res.rows and key[0] == key[1]:
+        results.append(parse_page(page, wallet_hint, carry_date))
+        if not any(r.rows for r in results):
+            continue
+        merged = merge_results(results)
+        if merged.rows and all(_clean(r) for r in merged.rows):
             break
-    assert best is not None
-    return best
+    if merged is None:
+        merged = results[0]
+    merged.last_date = next((r.date for r in reversed(merged.rows) if r.date), carry_date)
+    return merged

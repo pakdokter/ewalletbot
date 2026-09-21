@@ -24,10 +24,11 @@ Hasilnya adalah **rekap internal**, bukan e-statement resmi GoPay. OVO menyusul 
 ## Cara pakai
 
 1. `/saldoawal 62620.36` — saldo GoPay sebelum transaksi pertama (screenshot tidak memuat saldo).
-2. Kirim screenshot berurutan dari atas ke bawah (boleh album). **Kirim sebagai File** (📎 → File);
-   mode Photo dikompres Telegram dan tanggal/metode bisa hilang.
+2. Kirim **foto atau screenshot** berurutan dari atas ke bawah (boleh album). Foto layar HP diterima;
+   hasil terbaik bila layar memenuhi foto, tegak lurus, tanpa pantulan. Kirim sebagai File (📎 → File)
+   bila ingin kualitas asli tanpa kompresi Telegram.
 3. Cek balasan bot. Baris bertanda ⚠ perlu dicek. Perbaiki dengan
-   `/ubah <no> ket|nominal|tgl|metode <nilai>` atau `/hapus <no>`. `/daftar` menampilkan semua baris.
+   `/ubah <no> ket|nominal|tgl|metode <nilai>`, `/tanggal dd/mm/yyyy [no ...]` (isi tanggal yang hilang), atau `/hapus <no>`. `/daftar` menampilkan semua baris.
 4. `/rekap` → unduh Excel. Isi kolom **C** dan **I** secara manual.
 5. Samakan **Saldo Akhir** di Excel dengan saldo di aplikasi. Selisih berarti ada baris salah baca atau terlewat.
 
@@ -50,15 +51,27 @@ Hasilnya adalah **rekap internal**, bukan e-statement resmi GoPay. OVO menyusul 
 
 ## Status verifikasi
 
-Sudah diuji: foto layar GoPay contoh (4/4 baris benar), 18 unit test, Excel dihitung ulang di
+Sudah diuji: foto layar GoPay contoh (4/4 baris benar), 21 unit test, Excel dihitung ulang di
 LibreOffice (0 error, saldo cocok hitungan manual), alur bot dengan mock Telegram.
 
 **Belum diuji:** koneksi Telegram sungguhan, build Docker/deploy Railway, album multi-foto,
 mode gelap, screenshot GoPay dengan tampilan/versi aplikasi lain.
 
+Hasil uji pada foto layar GoPay contoh (nominal / tanggal+metode benar, dari 4 baris):
+
+| Kualitas gambar | Nominal | Tanggal+metode | Salah tanpa tanda |
+|---|---|---|---|
+| Foto asli | 4/4 | 4/4 | 0 |
+| Telegram 1280px q75 (Photo biasa) | 4/4 | 4/4 | 0 |
+| Telegram 1280px q60 | 4/4 | 3/4 | 0 |
+| 1024px q60 | 4/4 | 0/4 (ditandai) | 0 |
+| 800px q60 | 2/4 (sisanya ditandai) | 0/4 (ditandai) | 0 |
+
+Pengujian ini dari satu foto yang disimulasikan menjadi beberapa kualitas, bukan dari banyak foto berbeda.
+
 Batas yang diketahui:
-- Nominal terbaca andal; **nama merchant lebih rentan salah** — bot menandainya, tapi tetap dicek.
-- Foto layar yang dikompres Telegram kehilangan tanggal/metode (bot menandai baris itu).
+- Nominal terbaca andal; **nama merchant lebih rentan salah** (kadang ada huruf sisa ikon di depan) — bot menandai yang ragu, tapi tetap dicek.
+- Bila tanggal/metode tak terbaca: tanggal ditandai dan bisa diisi `/tanggal`; metode ditebak dari format nominal ("Rp" = Saldo, tanpa "Rp" = Coins) dan selalu ditandai ⚠. Tebakan ini baru teramati pada satu contoh layar.
 - Tidak ada koreksi perspektif; foto sangat miring bisa gagal.
 - Dua transaksi identik tepat di batas dua screenshot dianggap tumpang tindih dan dilewati (bot memberi tahu).
 

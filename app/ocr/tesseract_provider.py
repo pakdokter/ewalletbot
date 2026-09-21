@@ -106,6 +106,12 @@ class TesseractProvider(OcrProvider):
 
         return reocr
 
+    @staticmethod
+    def _sharpen(gray: np.ndarray) -> np.ndarray:
+        """Penajaman keras: memulihkan teks abu-abu terang (tanggal, metode) yang hilang pada foto terkompres."""
+        blur = cv2.GaussianBlur(gray, (0, 0), 3)
+        return cv2.addWeighted(gray, 2.0, blur, -1.0, 0)
+
     def passes(self, image_bytes: bytes) -> Iterator[OcrPage]:
         img = self._fit_width(self._crop_screen(self._decode(image_bytes)))
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -115,6 +121,9 @@ class TesseractProvider(OcrProvider):
         norm = cv2.divide(gray, cv2.GaussianBlur(gray, (0, 0), 41), scale=255)   # ratakan cahaya/glare
         h, w = gray.shape[:2]
         reocr = self._make_reocr(gray)
-        # urutan berdasarkan uji: gray+psm6 terbaik, lalu dua alternatif sebagai cadangan
-        for name, im, psm in (("gray-psm6", gray, 6), ("norm-psm11", norm, 11), ("gray-psm4", gray, 4)):
+        sharp = self._sharpen(gray)
+        # urutan berdasarkan uji: gray+psm6 terbaik untuk screenshot; pass 'sharp' menolong foto layar.
+        # Hasil antar-pass digabung di parser (tanggal/metode yang hilang di satu pass diisi dari pass lain).
+        for name, im, psm in (("gray-psm6", gray, 6), ("sharp-psm6", sharp, 6), ("norm-psm11", norm, 11),
+                              ("sharp-psm11", sharp, 11), ("gray-psm4", gray, 4)):
             yield OcrPage(self._data(im, psm), w, h, img, not dark, name, reocr)
