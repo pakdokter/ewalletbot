@@ -19,11 +19,13 @@ Hasilnya adalah **rekap internal**, bukan e-statement resmi GoPay. OVO menyusul 
 
 > Cek log saat start: baris `data=/data` berarti Volume terpasang. Kalau tertulis `data=data`,
 > Volume belum terpasang dan sesi akan hilang saat redeploy.
+> Setiap pesan masuk dicatat di log sebagai `pesan masuk: command /saldoawal` (tanpa isi/angka), jadi kamu bisa melihat apakah pesan sampai ke bot.
 > Token bot tidak lagi tercetak di log. Jika pernah tercetak/terkirim ke pihak lain, ganti lewat BotFather (`/revoke`).
 
 ## Cara pakai
 
-1. `/saldoawal 62620.36` — saldo GoPay sebelum transaksi pertama (screenshot tidak memuat saldo).
+1. `/saldoawal 62620.36` — saldo GoPay sebelum transaksi pertama (screenshot tidak memuat saldo). Boleh `0`.
+   Mengetik angkanya saja (mis. `0`) juga diterima selama saldo awal belum diisi.
 2. Kirim **foto atau screenshot** berurutan dari atas ke bawah (boleh album). Foto layar HP diterima;
    hasil terbaik bila layar memenuhi foto, tegak lurus, tanpa pantulan. Kirim sebagai File (📎 → File)
    bila ingin kualitas asli tanpa kompresi Telegram.
@@ -51,7 +53,7 @@ Hasilnya adalah **rekap internal**, bukan e-statement resmi GoPay. OVO menyusul 
 
 ## Status verifikasi
 
-Sudah diuji: foto layar GoPay contoh (4/4 baris benar), 21 unit test, Excel dihitung ulang di
+Sudah diuji: foto layar GoPay contoh (4/4 baris benar), 40 unit test, Excel dihitung ulang di
 LibreOffice (0 error, saldo cocok hitungan manual), alur bot dengan mock Telegram.
 
 **Belum diuji:** koneksi Telegram sungguhan, build Docker/deploy Railway, album multi-foto,
